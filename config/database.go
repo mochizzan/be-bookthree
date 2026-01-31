@@ -13,7 +13,7 @@ func ConnectDB() {
 	var err error
 	// Format: username:password@tcp(host:port)/nama_database
 	// Sesuaikan dengan user/pass mysql kamu (biasanya root dan kosong)
-	connectionString := "root:@Miproduction04@tcp(127.0.0.1:3306)/bookthree_db"
+	connectionString := "miproduction:@Miproduction04@tcp(127.0.0.1:3306)/bookthree_db"
 
 	DB, err = sql.Open("mysql", connectionString)
 	if err != nil {
