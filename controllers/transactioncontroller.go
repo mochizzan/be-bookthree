@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -108,16 +109,15 @@ func CheckoutHandler(w http.ResponseWriter, r *http.Request) {
 // 2. GET ALL TRANSACTIONS (Untuk Admin Dashboard)
 func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 	enableCors(&w)
-	if r.Method == "OPTIONS" {
-		return
-	}
 
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	rows, err := config.DB.Query("SELECT id, order_code, customer_name, total_amount, status, payment_method, created_at FROM transactions ORDER BY created_at DESC")
+	// 1. Query Data Transaksi Utama
+	// Perhatikan urutan SELECT harus sama dengan urutan SCAN di bawah
+	rows, err := config.DB.Query(`
+		SELECT id, order_code, customer_name, customer_phone, customer_address, 
+		       total_amount, status, payment_method, created_at 
+		FROM transactions 
+		ORDER BY created_at DESC
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -125,15 +125,75 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var transactions []models.Transaction
+
 	for rows.Next() {
 		var t models.Transaction
-		var dateStr string
-		// Scan (Perhatikan urutan kolom di query)
-		if err := rows.Scan(&t.ID, &t.OrderCode, &t.CustomerName, &t.TotalAmount, &t.Status, &t.PaymentMethod, &dateStr); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+
+		// Gunakan sql.NullString untuk antisipasi jika data kosong di DB
+		var phone, address sql.NullString
+
+		// Scan data sesuai tipe data struct (TotalAmount pakai float64)
+		if err := rows.Scan(
+			&t.ID,
+			&t.OrderCode,
+			&t.CustomerName,
+			&phone,
+			&address,
+			&t.TotalAmount, // float64
+			&t.Status,
+			&t.PaymentMethod,
+			&t.Date, // time.Time
+		); err != nil {
+			log.Println("Scan error:", err)
+			continue
 		}
-		t.Date = dateStr
+
+		// Pindahkan dari NullString ke String biasa di Struct
+		if phone.Valid {
+			t.CustomerPhone = phone.String
+		}
+		if address.Valid {
+			t.Address = address.String
+		} // Perhatikan: Field di struct kamu bernama 'Address'
+
+		// --- 2. LOGIC AMBIL DETAIL BUKU (Nested Query) ---
+		// Kita join ke tabel books untuk ambil Title & Image
+		detailRows, err := config.DB.Query(`
+			SELECT td.id, td.book_id, td.quantity, td.price, b.title, b.image_url
+			FROM transaction_details td
+			JOIN books b ON td.book_id = b.id
+			WHERE td.transaction_id = ?
+		`, t.ID)
+
+		if err != nil {
+			log.Println("Detail query error:", err)
+		} else {
+			var details []models.TransactionDetail
+			for detailRows.Next() {
+				var d models.TransactionDetail
+				var bookTitle, bookImage string
+
+				// Scan detail
+				// Perhatikan d.Price pakai float64
+				err := detailRows.Scan(&d.ID, &d.BookID, &d.Quantity, &d.Price, &bookTitle, &bookImage)
+				if err != nil {
+					log.Println("Scan detail error:", err)
+					continue
+				}
+
+				// Masukkan ke nested struct Book
+				d.Book.Title = bookTitle
+				d.Book.Image = bookImage
+
+				details = append(details, d)
+			}
+			detailRows.Close()
+
+			// Masukkan hasil detail ke transaksi saat ini
+			t.Details = details
+		}
+		// -----------------------------------------------------------
+
 		transactions = append(transactions, t)
 	}
 

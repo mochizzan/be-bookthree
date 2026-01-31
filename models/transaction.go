@@ -23,4 +23,8 @@ type TransactionDetail struct {
 	BookID        int     `json:"book_id"`
 	Quantity      int     `json:"quantity"`
 	Price         float64 `json:"price"` // Harga saat beli
+	Book struct {
+		Title string `json:"title"`
+		Image string `json:"image"`
+	} `json:"book"`
 }
