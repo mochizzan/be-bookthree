@@ -24,7 +24,7 @@ func main() {
 	fs := http.FileServer(http.Dir("./uploads"))
 	http.Handle("/uploads/", http.StripPrefix("/uploads/", fs))
 
-	port := ":8080"
+	port := ":8082"
 	fmt.Println("Server running on port", port)
 	err := http.ListenAndServe(port, nil)
 	if err != nil {
