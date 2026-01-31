@@ -57,21 +57,21 @@ func CheckoutHandler(w http.ResponseWriter, r *http.Request) {
 	// Step 1: Insert Header Transaksi
 	// PERHATIKAN: Kita menggunakan 'generatedOrderCode' di sini, BUKAN 'txData.OrderCode'
 	res, err := tx.Exec("INSERT INTO transactions (order_code, customer_name, customer_email, customer_phone, customer_address, payment_method, total_amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        generatedOrderCode, 
-        txData.CustomerName, 
-        txData.CustomerEmail, // <--- Masukkan Email
-        txData.CustomerPhone, 
-        txData.Address, 
-        txData.PaymentMethod, 
-        txData.TotalAmount, 
-        100, 
-        time.Now())
+		generatedOrderCode,
+		txData.CustomerName,
+		txData.CustomerEmail, // <--- Masukkan Email
+		txData.CustomerPhone,
+		txData.Address,
+		txData.PaymentMethod,
+		txData.TotalAmount,
+		100,
+		time.Now())
 
-    if err != nil {
-        tx.Rollback()
-        http.Error(w, "Gagal simpan transaksi: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, "Gagal simpan transaksi: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	txID, _ := res.LastInsertId()
 
@@ -136,39 +136,44 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var t models.Transaction
-		
+
 		// Gunakan sql.NullString untuk antisipasi jika data kosong
-		var email, phone, address sql.NullString 
-		
+		var email, phone, address sql.NullString
+
 		if err := rows.Scan(
-			&t.ID, 
-			&t.OrderCode, 
-			&t.CustomerName, 
-			&email,   // <--- Scan Email
-			&phone, 
+			&t.ID,
+			&t.OrderCode,
+			&t.CustomerName,
+			&email, // <--- Scan Email
+			&phone,
 			&address,
 			&t.TotalAmount,
-			&t.Status, 
-			&t.PaymentMethod, 
+			&t.Status,
+			&t.PaymentMethod,
 			&t.Date,
 		); err != nil {
 			log.Println("Scan error:", err)
 			continue
 		}
 
-		if email.Valid { t.CustomerEmail = email.String } // <--- Assign Email
-		if phone.Valid { t.CustomerPhone = phone.String }
-		if address.Valid { t.Address = address.String }
+		if email.Valid {
+			t.CustomerEmail = email.String
+		} // <--- Assign Email
+		if phone.Valid {
+			t.CustomerPhone = phone.String
+		}
+		if address.Valid {
+			t.Address = address.String
+		}
 
 		// --- 2. LOGIC AMBIL DETAIL BUKU (Nested Query) ---
-		// PERBAIKAN DISINI: Ganti 'td.price' menjadi 'td.price_at_purchase'
 		detailRows, err := config.DB.Query(`
 			SELECT td.id, td.book_id, td.quantity, td.price_at_purchase, b.title, b.image_url
 			FROM transaction_details td
 			JOIN books b ON td.book_id = b.id
 			WHERE td.transaction_id = ?
 		`, t.ID)
-		
+
 		if err != nil {
 			log.Println("Detail query error:", err) // Cek log ini jika masih error
 		} else {
@@ -183,10 +188,10 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 					log.Println("Scan detail error:", err)
 					continue
 				}
-				
+
 				d.Book.Title = bookTitle
 				d.Book.Image = bookImage
-				
+
 				details = append(details, d)
 			}
 			detailRows.Close()
@@ -265,12 +270,12 @@ func GetTransactionByCodeHandler(w http.ResponseWriter, r *http.Request) {
 		WHERE order_code = ?`, code)
 
 	err := row.Scan(
-		&t.ID, 
-		&t.OrderCode, 
-		&t.CustomerName, 
-		&t.TotalAmount, 
-		&t.Status, 
-		&t.PaymentMethod, 
+		&t.ID,
+		&t.OrderCode,
+		&t.CustomerName,
+		&t.TotalAmount,
+		&t.Status,
+		&t.PaymentMethod,
 		&t.Date, // <--- Langsung scan ke time.Time
 	)
 
@@ -290,20 +295,20 @@ func GetTransactionByCodeHandler(w http.ResponseWriter, r *http.Request) {
 		FROM transaction_details td 
 		JOIN books b ON td.book_id = b.id 
 		WHERE td.transaction_id = ?`, t.ID)
-	
+
 	if err == nil {
 		defer rows.Close()
-		
+
 		var details []models.TransactionDetail
 		for rows.Next() {
 			var d models.TransactionDetail
-			
+
 			// Scan data detail
 			err := rows.Scan(&d.Quantity, &d.Price, &d.Book.Title, &d.Book.Image)
 			if err != nil {
 				continue
 			}
-			
+
 			details = append(details, d)
 		}
 		t.Details = details
