@@ -1,19 +1,23 @@
 package models
 
+import "time"
+
 // Header Transaksi (Tabel transactions)
 type Transaction struct {
 	ID            int     `json:"id"`
 	OrderCode     string  `json:"order_code"`
 	CustomerName  string  `json:"customer_name"`
+	CustomerEmail string  `json:"customer_email"` // <--- TAMBAHKAN INI
 	CustomerPhone string  `json:"customer_phone"`
 	Address       string  `json:"customer_address"`
 	PaymentMethod string  `json:"payment_method"`
 	TotalAmount   float64 `json:"total_amount"`
 	Status        int     `json:"status"`
-	Date          string  `json:"date"` // Kita ambil dari created_at
 	
-	// Optional: Untuk menerima input detail saat checkout
-	Details []TransactionDetail `json:"details,omitempty"` 
+	// Ubah Date jadi time.Time agar mudah di-scan
+	Date          time.Time `json:"date"` 
+
+	Details []TransactionDetail `json:"details"` 
 }
 
 // Detail Item (Tabel transaction_details)

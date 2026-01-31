@@ -56,14 +56,22 @@ func CheckoutHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: Insert Header Transaksi
 	// PERHATIKAN: Kita menggunakan 'generatedOrderCode' di sini, BUKAN 'txData.OrderCode'
-	res, err := tx.Exec("INSERT INTO transactions (order_code, customer_name, customer_phone, customer_address, payment_method, total_amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		generatedOrderCode, txData.CustomerName, txData.CustomerPhone, txData.Address, txData.PaymentMethod, txData.TotalAmount, 100, time.Now())
+	res, err := tx.Exec("INSERT INTO transactions (order_code, customer_name, customer_email, customer_phone, customer_address, payment_method, total_amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        generatedOrderCode, 
+        txData.CustomerName, 
+        txData.CustomerEmail, // <--- Masukkan Email
+        txData.CustomerPhone, 
+        txData.Address, 
+        txData.PaymentMethod, 
+        txData.TotalAmount, 
+        100, 
+        time.Now())
 
-	if err != nil {
-		tx.Rollback()
-		http.Error(w, "Gagal simpan transaksi: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        tx.Rollback()
+        http.Error(w, "Gagal simpan transaksi: "+err.Error(), http.StatusInternalServerError)
+        return
+    }
 
 	txID, _ := res.LastInsertId()
 
@@ -111,9 +119,9 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 	enableCors(&w)
 
 	// 1. Query Data Transaksi Utama
-	// Perhatikan urutan SELECT harus sama dengan urutan SCAN di bawah
+	// Tambahkan customer_email di SELECT
 	rows, err := config.DB.Query(`
-		SELECT id, order_code, customer_name, customer_phone, customer_address, 
+		SELECT id, order_code, customer_name, customer_email, customer_phone, customer_address, 
 		       total_amount, status, payment_method, created_at 
 		FROM transactions 
 		ORDER BY created_at DESC
@@ -128,45 +136,41 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var t models.Transaction
-
-		// Gunakan sql.NullString untuk antisipasi jika data kosong di DB
-		var phone, address sql.NullString
-
-		// Scan data sesuai tipe data struct (TotalAmount pakai float64)
+		
+		// Gunakan sql.NullString untuk antisipasi jika data kosong
+		var email, phone, address sql.NullString 
+		
 		if err := rows.Scan(
-			&t.ID,
-			&t.OrderCode,
-			&t.CustomerName,
-			&phone,
+			&t.ID, 
+			&t.OrderCode, 
+			&t.CustomerName, 
+			&email,   // <--- Scan Email
+			&phone, 
 			&address,
-			&t.TotalAmount, // float64
-			&t.Status,
-			&t.PaymentMethod,
-			&t.Date, // time.Time
+			&t.TotalAmount,
+			&t.Status, 
+			&t.PaymentMethod, 
+			&t.Date,
 		); err != nil {
 			log.Println("Scan error:", err)
 			continue
 		}
 
-		// Pindahkan dari NullString ke String biasa di Struct
-		if phone.Valid {
-			t.CustomerPhone = phone.String
-		}
-		if address.Valid {
-			t.Address = address.String
-		} // Perhatikan: Field di struct kamu bernama 'Address'
+		if email.Valid { t.CustomerEmail = email.String } // <--- Assign Email
+		if phone.Valid { t.CustomerPhone = phone.String }
+		if address.Valid { t.Address = address.String }
 
 		// --- 2. LOGIC AMBIL DETAIL BUKU (Nested Query) ---
-		// Kita join ke tabel books untuk ambil Title & Image
+		// PERBAIKAN DISINI: Ganti 'td.price' menjadi 'td.price_at_purchase'
 		detailRows, err := config.DB.Query(`
-			SELECT td.id, td.book_id, td.quantity, td.price, b.title, b.image_url
+			SELECT td.id, td.book_id, td.quantity, td.price_at_purchase, b.title, b.image_url
 			FROM transaction_details td
 			JOIN books b ON td.book_id = b.id
 			WHERE td.transaction_id = ?
 		`, t.ID)
-
+		
 		if err != nil {
-			log.Println("Detail query error:", err)
+			log.Println("Detail query error:", err) // Cek log ini jika masih error
 		} else {
 			var details []models.TransactionDetail
 			for detailRows.Next() {
@@ -174,25 +178,20 @@ func TransactionListHandler(w http.ResponseWriter, r *http.Request) {
 				var bookTitle, bookImage string
 
 				// Scan detail
-				// Perhatikan d.Price pakai float64
 				err := detailRows.Scan(&d.ID, &d.BookID, &d.Quantity, &d.Price, &bookTitle, &bookImage)
 				if err != nil {
 					log.Println("Scan detail error:", err)
 					continue
 				}
-
-				// Masukkan ke nested struct Book
+				
 				d.Book.Title = bookTitle
 				d.Book.Image = bookImage
-
+				
 				details = append(details, d)
 			}
 			detailRows.Close()
-
-			// Masukkan hasil detail ke transaksi saat ini
 			t.Details = details
 		}
-		// -----------------------------------------------------------
 
 		transactions = append(transactions, t)
 	}
@@ -248,20 +247,33 @@ func GetTransactionByCodeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ambil code dari URL query param: /api/check-order?code=B3-XXXX
+	// Ambil code dari URL query param
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "Order Code is required", http.StatusBadRequest)
 		return
 	}
 
-	// Query Header Transaksi
+	// Variable penampung
 	var t models.Transaction
-	var dateStr string
 
-	row := config.DB.QueryRow("SELECT id, order_code, customer_name, total_amount, status, payment_method, created_at FROM transactions WHERE order_code = ?", code)
+	// 1. Query Header Transaksi
+	// HAPUS 'dateStr', scan langsung ke &t.Date
+	row := config.DB.QueryRow(`
+		SELECT id, order_code, customer_name, total_amount, status, payment_method, created_at 
+		FROM transactions 
+		WHERE order_code = ?`, code)
 
-	err := row.Scan(&t.ID, &t.OrderCode, &t.CustomerName, &t.TotalAmount, &t.Status, &t.PaymentMethod, &dateStr)
+	err := row.Scan(
+		&t.ID, 
+		&t.OrderCode, 
+		&t.CustomerName, 
+		&t.TotalAmount, 
+		&t.Status, 
+		&t.PaymentMethod, 
+		&t.Date, // <--- Langsung scan ke time.Time
+	)
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Pesanan tidak ditemukan", http.StatusNotFound)
@@ -270,14 +282,31 @@ func GetTransactionByCodeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	t.Date = dateStr
 
-	// Query Detail Barang (Optional: Biar user tahu dia beli apa)
-	rows, err := config.DB.Query("SELECT b.title, td.quantity FROM transaction_details td JOIN books b ON td.book_id = b.id WHERE td.transaction_id = ?", t.ID)
+	// 2. Query Detail Barang (Agar user tahu beli apa)
+	// Kita gunakan 'price_at_purchase' karena nama kolomnya itu
+	rows, err := config.DB.Query(`
+		SELECT td.quantity, td.price_at_purchase, b.title, b.image_url 
+		FROM transaction_details td 
+		JOIN books b ON td.book_id = b.id 
+		WHERE td.transaction_id = ?`, t.ID)
+	
 	if err == nil {
-		// Kita reuse struct TransactionDetail tapi kali ini kita inject Judul Buku manual ke struct (atau bikin struct baru, tapi biar cepat kita pakai map dulu untuk response ini)
-		// Agar simple, kita kirim header saja dulu, detailnya nanti bisa dikembangkan.
 		defer rows.Close()
+		
+		var details []models.TransactionDetail
+		for rows.Next() {
+			var d models.TransactionDetail
+			
+			// Scan data detail
+			err := rows.Scan(&d.Quantity, &d.Price, &d.Book.Title, &d.Book.Image)
+			if err != nil {
+				continue
+			}
+			
+			details = append(details, d)
+		}
+		t.Details = details
 	}
 
 	w.Header().Set("Content-Type", "application/json")
