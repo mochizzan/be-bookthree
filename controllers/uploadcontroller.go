@@ -56,7 +56,7 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 6. Return URL Lengkap Gambar
 	// URL ini akan disimpan di tabel books
-	fileURL := fmt.Sprintf("http://localhost:8080/uploads/%s", filename)
+	fileURL := fmt.Sprintf("https://bookthree.api.miproduction.my.id/uploads/%s", filename)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
